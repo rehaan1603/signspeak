@@ -67,7 +67,9 @@ Open `http://localhost:8000`, click **Start camera**, and show a hand sign. Hold
 
 ## Using real data instead of (or alongside) synthetic data
 
-The synthetic generator exists so the whole pipeline can be built, tested, and demoed without a camera — it's a stand-in, not the real signal. For a model that actually works well on your hand, collect real samples:
+The synthetic generator exists so the whole pipeline can be built, tested, and demoed without a camera — it's a stand-in, not the real signal. The shipped model is now trained on a mix of synthetic data and **real photographed ASL hand poses** (`data/real_landmarks.csv` — 1,197 samples across 24 static letters, landmarks extracted with MediaPipe from real hand photos, not synthetic geometry), which is what closed most of the gap between "looks right in a demo" and "recognizes an actual hand."
+
+To add more real samples yourself (from your own webcam):
 
 ```bash
 python src/data_collection.py --label A --samples 200
@@ -75,7 +77,7 @@ python src/data_collection.py --label A --samples 200
 python src/train.py --data data/landmarks.csv
 ```
 
-Both scripts write to the same CSV schema (`f0..f67,label`), so you can freely mix synthetic and real rows, or drop the synthetic file once you have enough real coverage. `train.py --data data/*.csv` (the default) picks up everything in `data/`.
+Both scripts write to the same CSV schema (`f0..f67,label`), so you can freely mix synthetic and real rows. `train.py --data data/*.csv` (the default) picks up everything in `data/`.
 
 ## Supported letters
 
@@ -89,9 +91,9 @@ Split across two different mechanisms:
 
 **2 motion letters** — `J` and `Z` — detected from fingertip trajectory rather than the ML classifier — see "Why this approach" above. Hold the base handshape (I for J, D for Z) and trace the motion: a hook for J, a zigzag for Z.
 
-## Model performance (synthetic demo set)
+## Model performance (real + synthetic data)
 
-Random Forest, 300 samples/class, 80/20 train/test split on the 24 static letters: **96% test accuracy**. Per-letter, 19 of 24 letters hit 95%+ F1; the M/N/T/E cluster sits around 74–98% F1 due to the documented geometric-model limitation above (worst case: M at 74%). This is an honest reflection of what a curl-only synthetic model can represent — real-world accuracy with actual webcam data will depend on lighting, camera angle, and how consistently you hold each sign, and should be *higher* than these synthetic numbers for the hard letters once the classifier can see real thumb-tuck detail, and roughly in line with them for the rest.
+Random Forest trained on 8,397 samples (real photographed hand poses + synthetic) across the 24 static letters, 80/20 train/test split: **94.7% test accuracy**. This is a more honest number than the earlier synthetic-only figure, since real photos are now in both the train and test splits — it reflects actual hand geometry, not just the simplified curl model. Per-letter, most letters are solidly separated; the weakest are the geometrically ambiguous cluster documented above — M (0.69 F1), N (0.77), S (0.82), E (0.75) — where thumb-tuck position and finger-crossing detail are hardest to distinguish even from real landmarks.
 
 ## Tech stack
 
