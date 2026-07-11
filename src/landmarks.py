@@ -40,6 +40,10 @@ def _get_mp_hands():
         _mp_hands = mp.solutions.hands.Hands(
             static_image_mode=True,
             max_num_hands=1,
+            model_complexity=0,  # lighter model -- meaningfully smaller memory
+            # footprint than the default (1), which matters on memory-capped
+            # hosts (e.g. Render's free 512MB tier). Slightly less accurate
+            # on tricky poses, but landmark extraction is still solid.
             min_detection_confidence=0.6,
             min_tracking_confidence=0.5,
         )
