@@ -79,11 +79,15 @@ Both scripts write to the same CSV schema (`f0..f67,label`), so you can freely m
 
 ## Supported letters
 
-All 26 letters, split across two different mechanisms:
+All 26 letters — the full alphabet, in both live demos:
 
-**24 static letters** (A–Y except J), classified frame-by-frame by the ML model from hand geometry. Most are cleanly separated; three letter groups are only *approximately* distinguishable with this simplified curl+rotation+spread geometric model, because real ASL also encodes detail this model doesn't capture — finger crossing (R), and exactly which fingers the thumb tucks between (M vs N vs T vs E). Real webcam training data resolves this better than the synthetic model can, since a real hand has all that extra detail for MediaPipe to actually see.
+`A B C D E F G H I J K L M N O P Q R S T U V W X Y Z`
 
-**2 motion letters** (J, Z), detected from fingertip trajectory rather than the ML classifier — see "Why this approach" above.
+Split across two different mechanisms:
+
+**24 static letters** — `A B C D E F G H I K L M N O P Q R S T U V W X Y` (every letter except J and Z) — classified frame-by-frame by the ML model from hand geometry. Most are cleanly separated; three letter groups are only *approximately* distinguishable with this simplified curl+rotation+spread geometric model, because real ASL also encodes detail this model doesn't capture — finger crossing (R), and exactly which fingers the thumb tucks between (M vs N vs T vs E). Real webcam training data resolves this better than the synthetic model can, since a real hand has all that extra detail for MediaPipe to actually see.
+
+**2 motion letters** — `J` and `Z` — detected from fingertip trajectory rather than the ML classifier — see "Why this approach" above. Hold the base handshape (I for J, D for Z) and trace the motion: a hook for J, a zigzag for Z.
 
 ## Model performance (synthetic demo set)
 
