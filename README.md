@@ -1,6 +1,8 @@
 # 🤟 SignSpeak — Real-Time ASL Alphabet Recognizer
 
-**🔴 Live demo:** [signspeak-9rfq.onrender.com](https://signspeak-9rfq.onrender.com) (hosted on Render's free tier — spins down after 15 min idle, first load can take ~30-50s to wake up)
+**🔴 Live demo (recommended):** [signspeak-seven.vercel.app](https://signspeak-seven.vercel.app) — runs 100% client-side (hand tracking + classifier both in-browser via WASM, no server, no video ever leaves your machine). Always on, no cold start.
+
+**Full backend demo:** [signspeak-9rfq.onrender.com](https://signspeak-9rfq.onrender.com) — the actual FastAPI + MediaPipe architecture described below, hosted on Render's free tier. Note: Render's free instance caps out at 512MB RAM, which is tight for MediaPipe's model-loading footprint under real traffic — if `/predict` calls return a 502, that's why. The Vercel demo above uses the same model and feature engineering (ported to JS and numerically verified to match), so it's the more reliable way to actually try it live.
 
 Recognizes the full American Sign Language alphabet from a live webcam feed. A Python backend uses **MediaPipe** to extract 21 hand landmarks per frame, converts them into a translation/scale-invariant geometric feature vector, and classifies the pose with a **scikit-learn** model — served over a **FastAPI** REST endpoint and consumed by a browser frontend that streams webcam frames and builds up words letter by letter. The two motion letters (J, Z) are handled separately by a lightweight fingertip-trajectory detector layered on top of the static classifier.
 
@@ -38,6 +40,10 @@ signspeak/
 │   └── test_motion_gestures.py # J/Z detector tests against synthetic trajectories
 ├── data/                       # Landmark CSVs (synthetic and/or real)
 ├── models/                     # Trained model artifacts (.pkl)
+├── web-demo/                   # Zero-backend client-side port (deployed to Vercel)
+│   ├── index.html              # Same UI, but hand tracking + classifier both run in-browser
+│   ├── pipeline.js             # JS port of landmarks.py + motion_gestures.py (verified numerically to match)
+│   └── model.js                # Trained RandomForest exported to a plain JS function via m2cgen
 └── requirements.txt
 ```
 
