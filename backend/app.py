@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import sys
+import time
 from pathlib import Path
 
 import cv2
@@ -26,7 +27,13 @@ from pydantic import BaseModel
 ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT / "src"))  # let us import src/landmarks.py etc.
 
-from landmarks import frame_to_feature_vector  # noqa: E402
+from landmarks import (  # noqa: E402
+    extract_raw_landmarks,
+    landmarks_to_feature_vector,
+    normalize_landmarks,
+)
+from motion_gestures import FingerTrail, detect_j_motion, detect_z_motion  # noqa: E402
+from signs import MOTION_LETTERS  # noqa: E402
 
 MODEL_PATH = ROOT / "models" / "sign_model.pkl"
 FRONTEND_DIR = ROOT / "frontend"
@@ -39,6 +46,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# J and Z are traced motions, not static handshapes -- a single-frame
+# classifier can't represent them (see src/motion_gestures.py). These
+# hold a short rolling trail of the relevant fingertip's recent
+# position, checked on every request alongside the static classifier.
+# Module-level/global state is fine here: this is a single-user local
+# demo server, not a multi-tenant service.
+_pinky_trail = FingerTrail()  # tracks landmark 20, for J
+_index_trail = FingerTrail()  # tracks landmark 8, for Z
 
 _bundle = None  # loaded lazily so the app can still start without a model
 
@@ -92,13 +108,34 @@ def predict(req: PredictRequest):
     bundle = get_bundle()
     frame = decode_data_url(req.image)
 
-    features = frame_to_feature_vector(frame)
-    if features is None:
+    points = extract_raw_landmarks(frame)
+    if points is None:
         return PredictResponse(hand_detected=False)
 
+    # Feed the motion trails before anything else, so J/Z detection sees
+    # every frame that has a hand in it regardless of what the static
+    # classifier below thinks the current handshape is.
+    normalized = normalize_landmarks(points)
+    now = time.time()
+    pinky_tip = (float(normalized[MOTION_LETTERS["J"]["tip_landmark"]][0]),
+                 float(normalized[MOTION_LETTERS["J"]["tip_landmark"]][1]))
+    index_tip = (float(normalized[MOTION_LETTERS["Z"]["tip_landmark"]][0]),
+                 float(normalized[MOTION_LETTERS["Z"]["tip_landmark"]][1]))
+    _pinky_trail.push(pinky_tip, now)
+    _index_trail.push(index_tip, now)
+
+    if detect_j_motion(_pinky_trail.points):
+        _pinky_trail.clear()
+        return PredictResponse(hand_detected=True, letter="J", confidence=0.9,
+                                top_k=[{"letter": "J", "confidence": 0.9}])
+    if detect_z_motion(_index_trail.points):
+        _index_trail.clear()
+        return PredictResponse(hand_detected=True, letter="Z", confidence=0.9,
+                                top_k=[{"letter": "Z", "confidence": 0.9}])
+
+    features = landmarks_to_feature_vector(points).reshape(1, -1)
     model = bundle["model"]
     classes = bundle["classes"]
-    features = features.reshape(1, -1)
 
     if hasattr(model, "predict_proba"):
         probs = model.predict_proba(features)[0]
