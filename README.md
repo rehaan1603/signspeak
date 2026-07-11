@@ -1,16 +1,19 @@
 # 🤟 SignSpeak — Real-Time ASL Alphabet Recognizer
 
-Recognizes static American Sign Language letters from a live webcam feed. A Python backend uses **MediaPipe** to extract 21 hand landmarks per frame, converts them into a translation/scale-invariant geometric feature vector, and classifies the pose with a **scikit-learn** model — served over a **FastAPI** REST endpoint and consumed by a browser frontend that streams webcam frames and builds up words letter by letter.
+Recognizes the full American Sign Language alphabet from a live webcam feed. A Python backend uses **MediaPipe** to extract 21 hand landmarks per frame, converts them into a translation/scale-invariant geometric feature vector, and classifies the pose with a **scikit-learn** model — served over a **FastAPI** REST endpoint and consumed by a browser frontend that streams webcam frames and builds up words letter by letter. The two motion letters (J, Z) are handled separately by a lightweight fingertip-trajectory detector layered on top of the static classifier.
 
 ```
-Webcam frame → MediaPipe hand landmarks → geometric feature vector (68-d)
-            → ML classifier (Random Forest / SVM) → predicted letter
+Webcam frame → MediaPipe hand landmarks
+            → geometric feature vector (68-d) → ML classifier (24 static letters)
+            → fingertip trajectory buffer      → motion detector (J, Z)
             → FastAPI /predict endpoint → browser UI (live overlay + word buffer)
 ```
 
 ## Why this approach
 
 Classifying raw pixels for hand signs needs a CNN, a large labeled image dataset, and a GPU to train reasonably. Extracting hand landmarks first (MediaPipe does this in a few ms on CPU) collapses the problem to a small, well-structured feature vector — 21 landmarks × (x, y, z) normalized against the wrist and hand scale, plus 5 per-finger flexion angles. A lightweight classical classifier hits high accuracy on this representation with orders of magnitude less data and no GPU, and inference is fast enough to run live in a browser loop.
+
+J and Z can't be represented this way at all, because they're defined by *motion* (a traced hook and a traced zigzag), not a held handshape — a single-frame classifier is structurally the wrong tool for them. Rather than skip them or fake a static approximation, the backend keeps a short rolling trail of the relevant fingertip's recent position and a separate geometric detector (`src/motion_gestures.py`) recognizes the shape of that trail.
 
 ## Project structure
 
@@ -19,7 +22,8 @@ signspeak/
 ├── src/
 │   ├── landmarks.py            # MediaPipe extraction + feature engineering (shared by training & serving)
 │   ├── hand_model.py           # Forward-kinematics hand model (synthetic data only)
-│   ├── signs.py                # Letter → hand-pose definitions
+│   ├── signs.py                # Letter → hand-pose definitions (24 static + 2 motion)
+│   ├── motion_gestures.py      # Trajectory-based J/Z detection
 │   ├── generate_synthetic_data.py  # Bootstraps a training set without a camera
 │   ├── data_collection.py      # Records REAL labeled samples from your webcam
 │   └── train.py                # Trains + evaluates the classifier, saves the model
@@ -28,7 +32,8 @@ signspeak/
 ├── frontend/
 │   └── index.html              # Webcam capture UI, live predictions, word buffer
 ├── tests/
-│   └── test_pipeline.py        # Feature-engineering sanity tests (invariance, separability)
+│   ├── test_pipeline.py        # Feature-engineering sanity tests (invariance, separability)
+│   └── test_motion_gestures.py # J/Z detector tests against synthetic trajectories
 ├── data/                       # Landmark CSVs (synthetic and/or real)
 ├── models/                     # Trained model artifacts (.pkl)
 └── requirements.txt
@@ -50,7 +55,7 @@ python src/train.py --data data/synthetic_landmarks.csv
 uvicorn backend.app:app --reload --port 8000
 ```
 
-Open `http://localhost:8000`, click **Start camera**, and show a hand sign. Hold a pose steady for about a second and the letter gets appended to the word buffer below the video.
+Open `http://localhost:8000`, click **Start camera**, and show a hand sign. Hold a static pose steady for about a second and the letter gets appended to the word buffer below the video. For J and Z, hold the base handshape (I for J, D for Z) and trace the motion — a hook for J, a zigzag for Z.
 
 ## Using real data instead of (or alongside) synthetic data
 
@@ -64,13 +69,17 @@ python src/train.py --data data/landmarks.csv
 
 Both scripts write to the same CSV schema (`f0..f67,label`), so you can freely mix synthetic and real rows, or drop the synthetic file once you have enough real coverage. `train.py --data data/*.csv` (the default) picks up everything in `data/`.
 
-## Currently supported letters
+## Supported letters
 
-The demo ships with 8 statically-distinguishable ASL letters chosen because they differ cleanly by *which fingers are extended*: **A, B, C, D, I, L, V, Y**. Extending to the full alphabet mostly means collecting real samples for the remaining letters (a few, like J and Z, involve motion and would need a sequence/gesture model rather than single-frame classification — a natural "next step" extension).
+All 26 letters, split across two different mechanisms:
+
+**24 static letters** (A–Y except J), classified frame-by-frame by the ML model from hand geometry. Most are cleanly separated; three letter groups are only *approximately* distinguishable with this simplified curl+rotation+spread geometric model, because real ASL also encodes detail this model doesn't capture — finger crossing (R), and exactly which fingers the thumb tucks between (M vs N vs T vs E). Real webcam training data resolves this better than the synthetic model can, since a real hand has all that extra detail for MediaPipe to actually see.
+
+**2 motion letters** (J, Z), detected from fingertip trajectory rather than the ML classifier — see "Why this approach" above.
 
 ## Model performance (synthetic demo set)
 
-Random Forest, 300 samples/class, 80/20 train/test split: **100% test accuracy**, 0 confusion between classes. This reflects how cleanly separated the 8 demo poses are in feature space — real-world accuracy with webcam data will depend on lighting, camera angle, and how consistently you hold each sign, and is normally in the 90s% with a few hundred real samples per letter.
+Random Forest, 300 samples/class, 80/20 train/test split on the 24 static letters: **96% test accuracy**. Per-letter, 19 of 24 letters hit 95%+ F1; the M/N/T/E cluster sits around 74–98% F1 due to the documented geometric-model limitation above (worst case: M at 74%). This is an honest reflection of what a curl-only synthetic model can represent — real-world accuracy with actual webcam data will depend on lighting, camera angle, and how consistently you hold each sign, and should be *higher* than these synthetic numbers for the hard letters once the classifier can see real thumb-tuck detail, and roughly in line with them for the rest.
 
 ## Tech stack
 
@@ -78,7 +87,7 @@ Python · MediaPipe (hand landmark detection) · scikit-learn (Random Forest / S
 
 ## Possible extensions
 
-- Full 26-letter alphabet with real collected data, plus J/Z via a short temporal window (buffer of landmark sequences + a simple RNN or DTW matcher) instead of single-frame classification.
+- Real collected data for the M/N/T/E and R/U/H clusters specifically, to resolve the geometric-model ambiguity documented above.
 - Two-hand support for signs that use both hands.
 - Confidence-based auto-correction / a dictionary layer to turn letter sequences into likely words.
 - Swap the browser polling loop for a WebSocket stream for lower latency.
@@ -86,4 +95,4 @@ Python · MediaPipe (hand landmark detection) · scikit-learn (Random Forest / S
 
 ## Resume bullet (if useful)
 
-> Built a real-time American Sign Language alphabet recognizer: MediaPipe hand-landmark extraction feeding a geometry-based feature pipeline into a scikit-learn classifier, served via a FastAPI backend with a browser webcam client — includes a synthetic data generator and automated tests so the ML pipeline is fully testable without hardware.
+> Built a real-time American Sign Language alphabet recognizer covering all 26 letters: MediaPipe hand-landmark extraction feeding a geometry-based feature pipeline into a scikit-learn classifier for the 24 static handshapes, plus a custom fingertip-trajectory detector for the two motion-based letters (J, Z) a single-frame classifier can't represent. Served via a FastAPI backend with a browser webcam client — includes a synthetic data generator and automated tests (including trajectory-based unit tests for the motion detector) so the full pipeline is testable without hardware.
