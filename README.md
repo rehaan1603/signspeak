@@ -1,5 +1,7 @@
 # 🤟 SignSpeak — Real-Time ASL Alphabet Recognizer
 
+**🔴 Live demo:** [signspeak-9rfq.onrender.com](https://signspeak-9rfq.onrender.com) (hosted on Render's free tier — spins down after 15 min idle, first load can take ~30-50s to wake up)
+
 Recognizes the full American Sign Language alphabet from a live webcam feed. A Python backend uses **MediaPipe** to extract 21 hand landmarks per frame, converts them into a translation/scale-invariant geometric feature vector, and classifies the pose with a **scikit-learn** model — served over a **FastAPI** REST endpoint and consumed by a browser frontend that streams webcam frames and builds up words letter by letter. The two motion letters (J, Z) are handled separately by a lightweight fingertip-trajectory detector layered on top of the static classifier.
 
 ```
