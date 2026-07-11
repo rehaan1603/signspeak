@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SignSpeak — Client-Side Demo</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --accent: #5eead4;
+    --accent-dim: #14b8a6;
+    --text: #e6e8ec;
+    --muted: #8b93a1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 64px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 8px; font-size: 0.95rem; max-width: 700px; text-align: center; }
+  .badge {
+    display: inline-block;
+    background: #142f2a;
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 4px 12px;
+    font-size: 0.78rem;
+    margin-bottom: 20px;
+  }
+  .layout {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 980px;
+    width: 100%;
+  }
+  .video-panel, .info-panel {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  video {
+    border-radius: 10px;
+    width: 480px;
+    max-width: 100%;
+    transform: scaleX(-1); /* mirror for display only; detection runs on a separately-mirrored canvas frame */
+  }
+  .video-wrap { position: relative; }
+  .info-panel { min-width: 260px; display: flex; flex-direction: column; gap: 16px; }
+  .letter-display {
+    font-size: 4rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--accent);
+    background: #10131a;
+    border-radius: 12px;
+    padding: 12px;
+    min-height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .confidence-bar-track {
+    background: #10131a;
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+  }
+  .confidence-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    width: 0%;
+    transition: width 0.15s ease;
+  }
+  .word-buffer {
+    background: #10131a;
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 48px;
+    font-size: 1.3rem;
+    letter-spacing: 2px;
+    word-break: break-all;
+  }
+  button {
+    background: var(--accent-dim);
+    border: none;
+    color: #04120f;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button:disabled { opacity: 0.5; cursor: default; }
+  button.secondary {
+    background: #232733;
+    color: var(--text);
+  }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .status { font-size: 0.85rem; color: var(--muted); }
+  .top-k { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
+  .top-k-row { display: flex; justify-content: space-between; color: var(--muted); }
+  footer { margin-top: 32px; color: var(--muted); font-size: 0.8rem; text-align: center; max-width: 640px; }
+  code { background: #10131a; padding: 1px 6px; border-radius: 4px; }
+  a { color: var(--accent); }
+</style>
+</head>
+<body>
+  <h1>🤟 SignSpeak</h1>
+  <div class="subtitle">Real-time ASL alphabet recognition — hand tracking (MediaPipe Tasks Vision, WASM) and the trained classifier both run entirely in your browser. No server, no video ever leaves your machine.</div>
+  <div class="badge">100% client-side demo · <a href="https://github.com/rehaan1603/signspeak" style="color:inherit">full backend version on GitHub</a></div>
+
+  <div class="layout">
+    <div class="video-panel">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+      </div>
+      <div class="btn-row" style="margin-top:12px;">
+        <button id="startBtn">Start camera</button>
+        <button id="stopBtn" class="secondary">Stop</button>
+      </div>
+      <div class="status" id="status">Loading hand-tracking model…</div>
+    </div>
+
+    <div class="info-panel">
+      <div>
+        <div class="status">Predicted letter</div>
+        <div class="letter-display" id="letterDisplay">–</div>
+        <div class="confidence-bar-track"><div class="confidence-bar-fill" id="confBar"></div></div>
+        <div class="status" id="confText">confidence: –</div>
+      </div>
+
+      <div>
+        <div class="status">Top matches</div>
+        <div class="top-k" id="topK"></div>
+      </div>
+
+      <div>
+        <div class="status">Word buffer (hold a sign to add a letter)</div>
+        <div class="word-buffer" id="wordBuffer"></div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button id="spaceBtn" class="secondary">Space</button>
+          <button id="backspaceBtn" class="secondary">⌫</button>
+          <button id="clearBtn" class="secondary">Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Hold static letters steady; trace J and Z with your fingertip.<br/>
+    Hand landmarks: <code>@mediapipe/tasks-vision</code> (WASM) · Classifier: trained scikit-learn RandomForest, exported to a plain JS function · Same feature engineering &amp; motion detection as the <a href="https://github.com/rehaan1603/signspeak">Python backend</a>, ported to JS and verified to match it numerically.
+  </footer>
+
+<script src="model.js"></script>
+<script src="pipeline.js"></script>
+<script type="module">
+import { HandLandmarker, FilesetResolver } from "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/vision_bundle.mjs";
+
+const CLASSES = ["A","B","C","D","E","F","G","H","I","K","L","M","N","O","P","Q","R","S","T","U","V","W","X","Y"];
+const PINKY_TIP = 20; // J
+const INDEX_TIP = 8;  // Z
+
+const video = document.getElementById('video');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusEl = document.getElementById('status');
+const letterDisplay = document.getElementById('letterDisplay');
+const confBar = document.getElementById('confBar');
+const confText = document.getElementById('confText');
+const topKEl = document.getElementById('topK');
+const wordBuffer = document.getElementById('wordBuffer');
+const spaceBtn = document.getElementById('spaceBtn');
+const backspaceBtn = document.getElementById('backspaceBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+const captureCanvas = document.createElement('canvas');
+const cctx = captureCanvas.getContext('2d', { willReadFrequently: true });
+
+let handLandmarker = null;
+let stream = null;
+let loopHandle = null;
+
+const pinkyTrail = new FingerTrail();
+const indexTrail = new FingerTrail();
+
+const HOLD_FRAMES = 8;
+const POLL_INTERVAL_MS = 220;
+let lastLetter = null;
+let holdCount = 0;
+let wordText = '';
+
+startBtn.disabled = true;
+
+async function init() {
+  const vision = await FilesetResolver.forVisionTasks(
+    "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm"
+  );
+  handLandmarker = await HandLandmarker.createFromOptions(vision, {
+    baseOptions: {
+      modelAssetPath:
+        "https://storage.googleapis.com/mediapipe-models/hand_landmarker/hand_landmarker/float16/1/hand_landmarker.task",
+      delegate: "GPU",
+    },
+    runningMode: "VIDEO",
+    numHands: 1,
+  });
+  startBtn.disabled = false;
+  statusEl.textContent = 'Model loaded. Click "Start camera".';
+}
+init().catch((err) => {
+  statusEl.textContent = 'Failed to load hand-tracking model: ' + err.message;
+});
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
+    video.srcObject = stream;
+    statusEl.textContent = 'Camera running — show a hand sign.';
+    loopHandle = setInterval(captureAndPredict, POLL_INTERVAL_MS);
+  } catch (err) {
+    statusEl.textContent = 'Could not access camera: ' + err.message;
+  }
+}
+
+function stopCamera() {
+  if (loopHandle) clearInterval(loopHandle);
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  statusEl.textContent = 'Camera stopped.';
+  letterDisplay.textContent = '–';
+  confBar.style.width = '0%';
+  confText.textContent = 'confidence: –';
+  topKEl.innerHTML = '';
+  pinkyTrail.clear();
+  indexTrail.clear();
+}
+
+function getMirroredFrame() {
+  // Mirror before detection (not just for display) so handedness/rotation
+  // conventions match how the synthetic training poses were authored --
+  // same reasoning as the Python backend mirroring the frame it sends
+  // to the model.
+  captureCanvas.width = video.videoWidth;
+  captureCanvas.height = video.videoHeight;
+  cctx.save();
+  cctx.translate(captureCanvas.width, 0);
+  cctx.scale(-1, 1);
+  cctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+  cctx.restore();
+  return captureCanvas;
+}
+
+function captureAndPredict() {
+  if (!video.videoWidth || !handLandmarker) return;
+
+  const frame = getMirroredFrame();
+  const result = handLandmarker.detectForVideo(frame, performance.now());
+
+  if (!result.landmarks || result.landmarks.length === 0) {
+    letterDisplay.textContent = '–';
+    confBar.style.width = '0%';
+    confText.textContent = 'confidence: –';
+    topKEl.innerHTML = '';
+    statusEl.textContent = 'No hand detected — show your hand to the camera.';
+    lastLetter = null;
+    holdCount = 0;
+    return;
+  }
+  statusEl.textContent = 'Camera running — show a hand sign.';
+
+  const points = result.landmarks[0]; // 21 x {x,y,z}
+  const norm = normalizeLandmarks(points);
+  const now = performance.now() / 1000;
+  pinkyTrail.push([norm[PINKY_TIP].x, norm[PINKY_TIP].y], now);
+  indexTrail.push([norm[INDEX_TIP].x, norm[INDEX_TIP].y], now);
+
+  let letter, confidence, topK;
+
+  if (detectJMotion(pinkyTrail.points)) {
+    pinkyTrail.clear();
+    letter = 'J'; confidence = 0.9; topK = [{ letter: 'J', confidence: 0.9 }];
+  } else if (detectZMotion(indexTrail.points)) {
+    indexTrail.clear();
+    letter = 'Z'; confidence = 0.9; topK = [{ letter: 'Z', confidence: 0.9 }];
+  } else {
+    const feat = landmarksToFeatureVector(points);
+    const scores = score(feat); // from model.js
+    const order = scores
+      .map((s, i) => [s, i])
+      .sort((a, b) => b[0] - a[0]);
+    topK = order.slice(0, 3).map(([s, i]) => ({ letter: CLASSES[i], confidence: s }));
+    letter = topK[0].letter;
+    confidence = topK[0].confidence;
+  }
+
+  handlePrediction(letter, confidence, topK);
+}
+
+function handlePrediction(letter, confidence, topK) {
+  letterDisplay.textContent = letter;
+  confBar.style.width = `${Math.round(confidence * 100)}%`;
+  confText.textContent = `confidence: ${(confidence * 100).toFixed(1)}%`;
+
+  topKEl.innerHTML = '';
+  topK.forEach((item) => {
+    const row = document.createElement('div');
+    row.className = 'top-k-row';
+    row.innerHTML = `<span>${item.letter}</span><span>${(item.confidence * 100).toFixed(1)}%</span>`;
+    topKEl.appendChild(row);
+  });
+
+  if (letter === lastLetter) {
+    holdCount += 1;
+  } else {
+    lastLetter = letter;
+    holdCount = 1;
+  }
+  if (holdCount === HOLD_FRAMES) {
+    wordText += letter;
+    wordBuffer.textContent = wordText;
+  }
+}
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', stopCamera);
+spaceBtn.addEventListener('click', () => { wordText += ' '; wordBuffer.textContent = wordText; });
+backspaceBtn.addEventListener('click', () => { wordText = wordText.slice(0, -1); wordBuffer.textContent = wordText; });
+clearBtn.addEventListener('click', () => { wordText = ''; wordBuffer.textContent = wordText; });
+</script>
+</body>
+</html>
