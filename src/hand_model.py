@@ -17,8 +17,6 @@ import numpy as np
 
 WRIST = np.array([0.5, 0.85, 0.0], dtype=np.float32)
 
-# (base_dir_degrees_from_up, mcp_distance, seg_lengths[3]) per finger,
-# roughly matching typical proportions of a hand facing the camera.
 _FINGER_GEOMETRY = {
     "thumb": (55.0, 0.10, (0.09, 0.07, 0.06)),
     "index": (15.0, 0.30, (0.11, 0.07, 0.06)),
@@ -38,13 +36,10 @@ _LANDMARK_SLOTS = {
 
 def _dir_from_angle(deg: float) -> np.ndarray:
     rad = np.radians(deg)
-    # "up" in image space is -y; 0 degrees points straight up.
     return np.array([np.sin(rad), -np.cos(rad), 0.0], dtype=np.float32)
 
 
 def _rotate_toward_wrist(direction: np.ndarray, bend_rad: float) -> np.ndarray:
-    """Rotate a 2D direction vector by bend_rad, curling it back down
-    (toward +y / the wrist) to simulate a finger folding into the palm."""
     c, s = np.cos(bend_rad), np.sin(bend_rad)
     x, y = direction[0], direction[1]
     new_x = x * c - y * s
@@ -52,23 +47,38 @@ def _rotate_toward_wrist(direction: np.ndarray, bend_rad: float) -> np.ndarray:
     return np.array([new_x, new_y, direction[2]], dtype=np.float32)
 
 
-def build_hand(pose: dict[str, float], noise: float = 0.0,
+def _rotate_xy_around(points: np.ndarray, center: np.ndarray, deg: float) -> np.ndarray:
+    if deg == 0:
+        return points
+    rad = np.radians(deg)
+    c, s = np.cos(rad), np.sin(rad)
+    shifted = points - center
+    x, y = shifted[:, 0].copy(), shifted[:, 1].copy()
+    shifted[:, 0] = x * c - y * s
+    shifted[:, 1] = x * s + y * c
+    return shifted + center
+
+
+def build_hand(pose: dict, noise: float = 0.0,
                rng: np.random.Generator | None = None) -> np.ndarray:
     """Build a (21, 3) landmark array from a pose spec.
 
-    pose: dict mapping finger name -> curl in [0, 1] (0 = fully
-    extended/straight, 1 = fully curled into the palm). Missing fingers
-    default to 0 (extended).
-    noise: stddev of Gaussian jitter added to every coordinate, to
-    simulate camera/tracking noise for augmentation.
+    pose: dict with per-finger curl in [0, 1] under keys thumb/index/
+    middle/ring/pinky (0 = extended, 1 = fully curled). Optional keys:
+    "rotation" (degrees, whole-hand rotation around the wrist) and
+    "spread" (dict of finger -> extra base-angle offset in degrees).
     """
     rng = rng or np.random.default_rng()
+    rotation = float(pose.get("rotation", 0.0))
+    spread = pose.get("spread", {})
+
     points = np.zeros((21, 3), dtype=np.float32)
     points[0] = WRIST
 
     for finger, (base_deg, mcp_dist, seg_lengths) in _FINGER_GEOMETRY.items():
         curl = float(pose.get(finger, 0.0))
-        max_bend = np.radians(80.0)  # per-joint bend at full curl
+        base_deg = base_deg + float(spread.get(finger, 0.0))
+        max_bend = np.radians(80.0)
         bend = curl * max_bend
 
         direction = _dir_from_angle(base_deg)
@@ -84,6 +94,9 @@ def build_hand(pose: dict[str, float], noise: float = 0.0,
         slot = _LANDMARK_SLOTS[finger]
         for idx, pt in zip(slot, (mcp, pip, dip, tip)):
             points[idx] = pt
+
+    if rotation:
+        points = _rotate_xy_around(points, WRIST, rotation)
 
     if noise > 0:
         points += rng.normal(0.0, noise, size=points.shape).astype(np.float32)

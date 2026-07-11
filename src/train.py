@@ -42,7 +42,7 @@ def load_dataset(patterns: list[str]) -> pd.DataFrame:
 def build_model(kind: str):
     if kind == "rf":
         return RandomForestClassifier(
-            n_estimators=200, max_depth=None, random_state=42, n_jobs=-1
+            n_estimators=60, max_depth=12, random_state=42, n_jobs=-1
         )
     if kind == "svm":
         return SVC(kernel="rbf", C=10, gamma="scale", probability=True, random_state=42)

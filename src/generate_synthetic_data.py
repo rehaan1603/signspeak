@@ -19,7 +19,7 @@ import numpy as np
 
 from hand_model import build_hand
 from landmarks import FEATURE_DIM, landmarks_to_feature_vector
-from signs import SIGN_POSES
+from signs import STATIC_SIGN_POSES
 
 DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 
@@ -27,12 +27,12 @@ DATA_DIR = Path(__file__).resolve().parent.parent / "data"
 def generate(samples_per_class: int, noise: float, seed: int) -> list[tuple[list[float], str]]:
     rng = np.random.default_rng(seed)
     rows = []
-    for label, pose in SIGN_POSES.items():
+    for label, pose in STATIC_SIGN_POSES.items():
         for _ in range(samples_per_class):
             points = build_hand(pose, noise=noise, rng=rng)
             features = landmarks_to_feature_vector(points)
             rows.append((features.tolist(), label))
-    rng.shuffle(rows)  # note: shuffles the outer list order in-place-ish via numpy
+    rng.shuffle(rows)
     return rows
 
 
@@ -56,7 +56,7 @@ def main():
         for features, label in rows:
             writer.writerow([*features, label])
 
-    print(f"Wrote {len(rows)} samples ({len(SIGN_POSES)} classes) to {out_path}")
+    print(f"Wrote {len(rows)} samples ({len(STATIC_SIGN_POSES)} classes) to {out_path}")
 
 
 if __name__ == "__main__":
