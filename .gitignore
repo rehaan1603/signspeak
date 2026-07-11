@@ -1,0 +1,13 @@
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.DS_Store
+data/raw_frames/
+*.log
+
+# Keep trained model + datasets tracked so the repo is runnable out of the box.
+# Remove the lines below if you'd rather not commit binary artifacts.
+# models/*.pkl
+# data/*.csv

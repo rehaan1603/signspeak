@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>SignSpeak — Real-Time ASL Recognizer</title>
+<style>
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --accent: #5eead4;
+    --accent-dim: #14b8a6;
+    --text: #e6e8ec;
+    --muted: #8b93a1;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 32px 16px 64px;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 4px; }
+  .subtitle { color: var(--muted); margin-bottom: 24px; font-size: 0.95rem; }
+  .layout {
+    display: flex;
+    gap: 24px;
+    flex-wrap: wrap;
+    justify-content: center;
+    max-width: 980px;
+    width: 100%;
+  }
+  .video-panel, .info-panel {
+    background: var(--panel);
+    border-radius: 14px;
+    padding: 16px;
+  }
+  video, canvas.overlay {
+    border-radius: 10px;
+    width: 480px;
+    max-width: 100%;
+  }
+  .video-wrap { position: relative; }
+  canvas.overlay {
+    position: absolute;
+    top: 0; left: 0;
+    pointer-events: none;
+  }
+  .info-panel { min-width: 260px; display: flex; flex-direction: column; gap: 16px; }
+  .letter-display {
+    font-size: 4rem;
+    font-weight: 700;
+    text-align: center;
+    color: var(--accent);
+    background: #10131a;
+    border-radius: 12px;
+    padding: 12px;
+    min-height: 96px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .confidence-bar-track {
+    background: #10131a;
+    border-radius: 6px;
+    height: 10px;
+    overflow: hidden;
+  }
+  .confidence-bar-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-dim), var(--accent));
+    width: 0%;
+    transition: width 0.15s ease;
+  }
+  .word-buffer {
+    background: #10131a;
+    border-radius: 10px;
+    padding: 12px;
+    min-height: 48px;
+    font-size: 1.3rem;
+    letter-spacing: 2px;
+    word-break: break-all;
+  }
+  button {
+    background: var(--accent-dim);
+    border: none;
+    color: #04120f;
+    font-weight: 600;
+    padding: 10px 14px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.9rem;
+  }
+  button.secondary {
+    background: #232733;
+    color: var(--text);
+  }
+  .btn-row { display: flex; gap: 8px; flex-wrap: wrap; }
+  .status { font-size: 0.85rem; color: var(--muted); }
+  .top-k { display: flex; flex-direction: column; gap: 6px; font-size: 0.85rem; }
+  .top-k-row { display: flex; justify-content: space-between; color: var(--muted); }
+  footer { margin-top: 32px; color: var(--muted); font-size: 0.8rem; text-align: center; }
+  code { background: #10131a; padding: 1px 6px; border-radius: 4px; }
+</style>
+</head>
+<body>
+  <h1>🤟 SignSpeak</h1>
+  <div class="subtitle">Real-time ASL alphabet recognition — MediaPipe landmarks + ML, running live from your webcam.</div>
+
+  <div class="layout">
+    <div class="video-panel">
+      <div class="video-wrap">
+        <video id="video" autoplay playsinline muted></video>
+      </div>
+      <div class="btn-row" style="margin-top:12px;">
+        <button id="startBtn">Start camera</button>
+        <button id="stopBtn" class="secondary">Stop</button>
+      </div>
+      <div class="status" id="status">Camera stopped.</div>
+    </div>
+
+    <div class="info-panel">
+      <div>
+        <div class="status">Predicted letter</div>
+        <div class="letter-display" id="letterDisplay">–</div>
+        <div class="confidence-bar-track"><div class="confidence-bar-fill" id="confBar"></div></div>
+        <div class="status" id="confText">confidence: –</div>
+      </div>
+
+      <div>
+        <div class="status">Top matches</div>
+        <div class="top-k" id="topK"></div>
+      </div>
+
+      <div>
+        <div class="status">Word buffer (hold a sign to add a letter)</div>
+        <div class="word-buffer" id="wordBuffer"></div>
+        <div class="btn-row" style="margin-top:8px;">
+          <button id="spaceBtn" class="secondary">Space</button>
+          <button id="backspaceBtn" class="secondary">⌫</button>
+          <button id="clearBtn" class="secondary">Clear</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    Backend: <code id="backendUrl">same-origin</code> · Endpoint: <code>/predict</code><br/>
+    No trained model yet? Run <code>python src/generate_synthetic_data.py</code> then <code>python src/train.py</code>.
+  </footer>
+
+<script>
+const video = document.getElementById('video');
+const startBtn = document.getElementById('startBtn');
+const stopBtn = document.getElementById('stopBtn');
+const statusEl = document.getElementById('status');
+const letterDisplay = document.getElementById('letterDisplay');
+const confBar = document.getElementById('confBar');
+const confText = document.getElementById('confText');
+const topKEl = document.getElementById('topK');
+const wordBuffer = document.getElementById('wordBuffer');
+const spaceBtn = document.getElementById('spaceBtn');
+const backspaceBtn = document.getElementById('backspaceBtn');
+const clearBtn = document.getElementById('clearBtn');
+
+// Same-origin by default (backend serves this file). Override if you're
+// running the frontend separately from the API, e.g. via a static server.
+const API_BASE = '';
+
+const captureCanvas = document.createElement('canvas');
+const ctx = captureCanvas.getContext('2d');
+
+let stream = null;
+let loopHandle = null;
+
+// Hold-to-confirm letter buffering: same predicted letter must appear
+// this many consecutive polls (roughly HOLD_FRAMES * interval seconds)
+// before it's appended to the word buffer, so a stable held sign reads
+// as one letter instead of spamming duplicates.
+const HOLD_FRAMES = 8;
+const POLL_INTERVAL_MS = 220;
+let lastLetter = null;
+let holdCount = 0;
+let wordText = '';
+
+async function startCamera() {
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: 480, height: 360 } });
+    video.srcObject = stream;
+    statusEl.textContent = 'Camera running — show a hand sign.';
+    loopHandle = setInterval(captureAndPredict, POLL_INTERVAL_MS);
+  } catch (err) {
+    statusEl.textContent = 'Could not access camera: ' + err.message;
+  }
+}
+
+function stopCamera() {
+  if (loopHandle) clearInterval(loopHandle);
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  statusEl.textContent = 'Camera stopped.';
+  letterDisplay.textContent = '–';
+  confBar.style.width = '0%';
+  confText.textContent = 'confidence: –';
+  topKEl.innerHTML = '';
+}
+
+async function captureAndPredict() {
+  if (!video.videoWidth) return;
+  captureCanvas.width = video.videoWidth;
+  captureCanvas.height = video.videoHeight;
+  ctx.translate(captureCanvas.width, 0);
+  ctx.scale(-1, 1); // mirror, matches what the user sees
+  ctx.drawImage(video, 0, 0, captureCanvas.width, captureCanvas.height);
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  const dataUrl = captureCanvas.toDataURL('image/jpeg', 0.7);
+
+  try {
+    const res = await fetch(`${API_BASE}/predict`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUrl }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      statusEl.textContent = err.detail || `Server error (${res.status})`;
+      return;
+    }
+    const data = await res.json();
+    handlePrediction(data);
+  } catch (err) {
+    statusEl.textContent = 'Prediction request failed: ' + err.message;
+  }
+}
+
+function handlePrediction(data) {
+  if (!data.hand_detected) {
+    letterDisplay.textContent = '–';
+    confBar.style.width = '0%';
+    confText.textContent = 'confidence: –';
+    topKEl.innerHTML = '';
+    statusEl.textContent = 'No hand detected — show your hand to the camera.';
+    lastLetter = null;
+    holdCount = 0;
+    return;
+  }
+
+  statusEl.textContent = 'Camera running — show a hand sign.';
+  letterDisplay.textContent = data.letter;
+  const conf = data.confidence ?? 0;
+  confBar.style.width = `${Math.round(conf * 100)}%`;
+  confText.textContent = `confidence: ${(conf * 100).toFixed(1)}%`;
+
+  topKEl.innerHTML = '';
+  (data.top_k || []).forEach(item => {
+    const row = document.createElement('div');
+    row.className = 'top-k-row';
+    row.innerHTML = `<span>${item.letter}</span><span>${(item.confidence * 100).toFixed(1)}%</span>`;
+    topKEl.appendChild(row);
+  });
+
+  // Hold-to-confirm: append the letter once it's been stable for
+  // HOLD_FRAMES consecutive polls, then require a change before it can
+  // fire again (so holding a sign doesn't spam the same letter).
+  if (data.letter === lastLetter) {
+    holdCount += 1;
+  } else {
+    lastLetter = data.letter;
+    holdCount = 1;
+  }
+  if (holdCount === HOLD_FRAMES) {
+    wordText += data.letter;
+    wordBuffer.textContent = wordText;
+  }
+}
+
+startBtn.addEventListener('click', startCamera);
+stopBtn.addEventListener('click', stopCamera);
+spaceBtn.addEventListener('click', () => { wordText += ' '; wordBuffer.textContent = wordText; });
+backspaceBtn.addEventListener('click', () => { wordText = wordText.slice(0, -1); wordBuffer.textContent = wordText; });
+clearBtn.addEventListener('click', () => { wordText = ''; wordBuffer.textContent = wordText; });
+</script>
+</body>
+</html>
