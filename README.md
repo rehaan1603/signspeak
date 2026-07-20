@@ -106,7 +106,3 @@ Python · MediaPipe (hand landmark detection) · scikit-learn (Random Forest / S
 - Confidence-based auto-correction / a dictionary layer to turn letter sequences into likely words.
 - Swap the browser polling loop for a WebSocket stream for lower latency.
 - Package the backend + a pinned frontend build into a Docker image for one-command deploy.
-
-## Resume bullet (if useful)
-
-> Built a real-time American Sign Language alphabet recognizer covering all 26 letters: MediaPipe hand-landmark extraction feeding a geometry-based feature pipeline into a scikit-learn classifier for the 24 static handshapes, plus a custom fingertip-trajectory detector for the two motion-based letters (J, Z) a single-frame classifier can't represent. Served via a FastAPI backend with a browser webcam client — includes a synthetic data generator and automated tests (including trajectory-based unit tests for the motion detector) so the full pipeline is testable without hardware.
